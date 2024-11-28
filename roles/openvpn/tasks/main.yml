@@ -1,0 +1,54 @@
+---
+- name: Install packages
+  ansible.builtin.package:
+    name:
+      - iptables
+      - openvpn
+    state: present
+    update_cache: true
+
+- name: Copy certs
+  ansible.builtin.copy:
+    src: certs
+    dest: "{{ openvpn_working_dir }}"
+    mode: '0600'
+  notify:
+    - restart_openvpn
+
+- name: Copy client configs
+  ansible.builtin.copy:
+    src: client01
+    dest: "{{ openvpn_working_dir }}/ccd"
+    mode: '0644'
+
+- name: Copy config files
+  ansible.builtin.template:
+    src: server.conf.j2
+    dest: "{{ openvpn_working_dir }}/server.conf"
+    mode: '0600'
+  notify:
+    - restart_openvpn
+
+- name: Create systemd service for iptables rules
+  ansible.builtin.template:
+    src: openvpn-iptables.service.j2
+    dest: /lib/systemd/system/openvpn-iptables.service
+  notify:
+    - restart_iptables
+
+- name: Create systemd service for openvpn
+  ansible.builtin.template:
+    src: openvpn-server@server.service.j2
+    dest: /lib/systemd/system/openvpn-server@server.service
+  notify:
+    - restart_openvpn
+
+- name: Start services
+  ansible.builtin.systemd:
+    state: started
+    name: "{{ item }}"
+    enabled: true
+    force: true
+  loop:
+    - "openvpn-server@server"
+    - "openvpn-iptables"

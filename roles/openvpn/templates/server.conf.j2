@@ -1,0 +1,24 @@
+port {{ openvpn_port }}
+proto {{ openvpn_protocol }}
+dev tun
+duplicate-cn
+topology subnet
+askpass {{ openvpn_certs_dir }}/.pass
+ca {{ openvpn_certs_dir }}/ca.crt
+cert {{ openvpn_certs_dir }}/server.crt
+key {{ openvpn_certs_dir }}/server.key
+dh {{ openvpn_certs_dir }}/dh.pem
+auth SHA256
+auth-nocache
+cipher AES-256-CBC
+tls-crypt {{ openvpn_certs_dir }}/tc.key
+server {{ openvpn_subnet }} {{ openvpn_mask }}
+client-to-client
+comp-lzo
+push "explicit-exit-notify 3"
+push "redirect-gateway def1"
+persist-key
+persist-tun
+status {{ openvpn_log_dir }}/openvpn-status.log
+log {{ openvpn_log_dir }}/openvpn.log
+verb {{ openvpn_log_level }}

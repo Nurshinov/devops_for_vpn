@@ -1,0 +1,3 @@
+ansible-core>=2.15.0
+ipaddr==2.2.0
+netaddr==1.3.0

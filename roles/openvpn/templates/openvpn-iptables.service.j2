@@ -1,0 +1,15 @@
+[Unit]
+Before=network.target
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/iptables -t nat -A POSTROUTING -s {{ openvpn_network }} ! -d {{ openvpn_network }} -j SNAT --to {{ ansible_host }}
+ExecStart=/usr/sbin/iptables -I INPUT -p udp --dport {{ openvpn_port }} -j ACCEPT
+ExecStart=/usr/sbin/iptables -I FORWARD -s {{ openvpn_network }} -j ACCEPT
+ExecStart=/usr/sbin/iptables -I FORWARD -m state --state RELATED,ESTABLISHED -j ACCEPT
+ExecStop=/usr/sbin/iptables -t nat -D POSTROUTING -s {{ openvpn_network }} ! -d {{ openvpn_network }} -j SNAT --to {{ ansible_host }}
+ExecStop=/usr/sbin/iptables -D INPUT -p udp --dport {{ openvpn_port }} -j ACCEPT
+ExecStop=/usr/sbin/iptables -D FORWARD -s {{ openvpn_network }} -j ACCEPT
+ExecStop=/usr/sbin/iptables -D FORWARD -m state --state RELATED,ESTABLISHED -j ACCEPT
+RemainAfterExit=yes
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,22 @@
+---
+# defaults file for openvpn
+
+# Apt vars
+openvpn_arch: "amd64"
+openvpn_version: "release/2.6"
+openvpn_os_release: "jammy"
+
+# Network vars
+openvpn_subnet: 10.0.0.0
+openvpn_mask: 255.255.255.0
+openvpn_network: "{{ openvpn_subnet + '/24' }}"
+openvpn_port: 11999
+openvpn_protocol: "udp"
+
+# Dirs vars
+openvpn_working_dir: "/etc/openvpn"
+openvpn_certs_dir: "{{ openvpn_working_dir }}/certs"
+openvpn_log_dir: "/var/log/openvpn"
+
+# Other
+openvpn_log_level: 3

@@ -1,0 +1,19 @@
+---
+# handlers file for openvpn
+- name: Restart iptables rule
+  ansible.builtin.systemd:
+    state: restarted
+    daemon_reload: true
+    name: openvpn-iptables
+  listen: "restart_iptables"
+  when:
+    - not ansible_check_mode
+
+- name: Restart openvpn systemd unit
+  ansible.builtin.systemd:
+    state: restarted
+    daemon_reload: true
+    name: openvpn-server@server
+  listen: "restart_openvpn"
+  when:
+    - not ansible_check_mode
