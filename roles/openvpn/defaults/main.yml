@@ -12,6 +12,7 @@ openvpn_mask: 255.255.255.0
 openvpn_network: "{{ openvpn_subnet + '/24' }}"
 openvpn_port: 11999
 openvpn_protocol: "udp"
+openvpn_iface: ""
 
 # Dirs vars
 openvpn_working_dir: "/etc/openvpn"

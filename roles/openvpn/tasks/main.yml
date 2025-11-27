@@ -1,4 +1,8 @@
 ---
+- name: Detect default interface
+  set_fact:
+    openvpn_iface: "{{ ansible_facts['default_ipv4']['interface'] }}"
+
 - name: Install packages
   ansible.builtin.package:
     name:
@@ -42,6 +46,8 @@
     dest: /lib/systemd/system/openvpn-server@server.service
   notify:
     - restart_openvpn
+
+- ansible.builtin.meta: flush_handlers
 
 - name: Start services
   ansible.builtin.systemd:

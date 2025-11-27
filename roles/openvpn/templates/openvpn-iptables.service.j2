@@ -2,11 +2,18 @@
 Before=network.target
 [Service]
 Type=oneshot
-ExecStart=/usr/sbin/iptables -t nat -A POSTROUTING -s {{ openvpn_network }} ! -d {{ openvpn_network }} -j SNAT --to {{ ansible_host }}
+# --- NAT MASQUERADE ---
+ExecStart=/usr/sbin/iptables -t nat -A POSTROUTING -s {{ openvpn_network }} -o {{ openvpn_iface }} -j MASQUERADE
+
+# --- Allow OpenVPN port ---
 ExecStart=/usr/sbin/iptables -I INPUT -p udp --dport {{ openvpn_port }} -j ACCEPT
+
+# --- Allow forwarding from VPN subnet ---
 ExecStart=/usr/sbin/iptables -I FORWARD -s {{ openvpn_network }} -j ACCEPT
 ExecStart=/usr/sbin/iptables -I FORWARD -m state --state RELATED,ESTABLISHED -j ACCEPT
-ExecStop=/usr/sbin/iptables -t nat -D POSTROUTING -s {{ openvpn_network }} ! -d {{ openvpn_network }} -j SNAT --to {{ ansible_host }}
+
+# --- Remove rules on stop ---
+ExecStop=/usr/sbin/iptables -t nat -D POSTROUTING -s {{ openvpn_network }} -o {{ openvpn_iface }} -j MASQUERADE
 ExecStop=/usr/sbin/iptables -D INPUT -p udp --dport {{ openvpn_port }} -j ACCEPT
 ExecStop=/usr/sbin/iptables -D FORWARD -s {{ openvpn_network }} -j ACCEPT
 ExecStop=/usr/sbin/iptables -D FORWARD -m state --state RELATED,ESTABLISHED -j ACCEPT
