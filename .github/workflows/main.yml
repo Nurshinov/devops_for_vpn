@@ -1,4 +1,4 @@
-name: GitHub Actions Demo
+name: Execute ansible
 on: [push]
 jobs:
   Explore-GitHub-Actions:
@@ -17,6 +17,7 @@ jobs:
       - name: Setup SSH
         run: |
           eval $(ssh-agent)
+          mkdir -p ~/.ssh
           echo -e "${{secrets.SSH_KEY}}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           ssh-add ~/.ssh/id_rsa
