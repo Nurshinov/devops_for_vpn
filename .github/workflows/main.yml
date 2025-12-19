@@ -22,4 +22,4 @@ jobs:
           echo -e "${{secrets.SSH_KEY}}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
       - name: Run ansible
-        run: ansible-playbook install_openvpn.yml -i inventory
+        run: ansible-playbook install_openvpn.yml -i inventory -o StrictHostKeyChecking=no
