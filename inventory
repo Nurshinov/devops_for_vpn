@@ -1,5 +1,5 @@
 [pq]
-13.60.156.206 ansible_user=ubuntu
+45.14.247.41 ansible_user=root
 
 [firstvds]
 moscow ansible_host=188.120.226.48 ansible_user=root
