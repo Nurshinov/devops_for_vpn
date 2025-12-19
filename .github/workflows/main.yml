@@ -1,7 +1,8 @@
 name: Execute ansible
 on: [push]
 jobs:
-  Explore-GitHub-Actions:
+  Ansible:
+    environment: "GE"
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
