@@ -20,8 +20,10 @@ jobs:
           eval $(ssh-agent)
           mkdir -p ~/.ssh
           echo -e "${{secrets.SSH_KEY}}" > ~/.ssh/id_rsa
+          echo "${{secrets.ANSIBLE_VAULT_PASSWORD }}" > ~/.vault_pass.txt
           chmod 600 ~/.ssh/id_rsa
       - name: Run ansible
         env:
           ANSIBLE_HOST_KEY_CHECKING: "False"
+          ANSIBLE_VAULT_PASSWORD_FILE: "~/.vault_pass.txt"
         run: ansible-playbook install_openvpn.yml -i inventory
