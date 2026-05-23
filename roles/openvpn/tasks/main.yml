@@ -3,6 +3,13 @@
   set_fact:
     openvpn_iface: "{{ ansible_facts['default_ipv4']['interface'] }}"
 
+- name: Enable ip_forward
+  ansible.posix.sysctl:
+    name: net.ipv4.ip_forward
+    value: '1'
+    state: present
+    reload: true
+
 - name: Install packages
   ansible.builtin.package:
     name:
