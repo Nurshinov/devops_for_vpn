@@ -8,7 +8,7 @@ Supported OS:
 
 # Usage
 ```yaml
-- hosts: pq
+- hosts: hetzner
   become: true
   roles:
     - openvpn

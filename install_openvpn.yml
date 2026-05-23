@@ -1,6 +1,6 @@
 ---
 - name: Install openvpn
-  hosts: pq
+  hosts: hetzner
   become: true
   roles:
     - openvpn
