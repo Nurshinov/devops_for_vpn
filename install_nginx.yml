@@ -1,0 +1,9 @@
+---
+- name: Install the Moscow OpenVPN UDP proxy
+  hosts: firstvds
+  become: true
+  serial: 1
+  vars:
+    nginx_proxy_upstream_host: 10.254.0.1
+  roles:
+    - nginx_proxy

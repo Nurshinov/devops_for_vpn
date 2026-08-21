@@ -1,0 +1,182 @@
+---
+- name: Install monitoring prerequisites
+  ansible.builtin.apt:
+    name:
+      - apt-transport-https
+      - ca-certificates
+      - openssl
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Create VictoriaMetrics system user
+  ansible.builtin.user:
+    name: victoriametrics
+    system: true
+    shell: /usr/sbin/nologin
+    home: "{{ victoriametrics_storage_path }}"
+    create_home: false
+
+- name: Create VictoriaMetrics directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner }}"
+    group: "{{ item.group }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - path: "{{ victoriametrics_source_dir }}"
+      owner: root
+      group: root
+      mode: '0755'
+    - path: "{{ victoriametrics_storage_path }}"
+      owner: victoriametrics
+      group: victoriametrics
+      mode: '0750'
+    - path: /etc/victoria-metrics
+      owner: root
+      group: victoriametrics
+      mode: '0750'
+
+- name: Download pinned VictoriaMetrics archive
+  ansible.builtin.get_url:
+    url: "{{ victoriametrics_download_url }}"
+    dest: "/usr/local/src/{{ victoriametrics_archive }}"
+    checksum: "sha256:{{ victoriametrics_checksum_url }}"
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Extract pinned VictoriaMetrics archive
+  ansible.builtin.unarchive:
+    src: "/usr/local/src/{{ victoriametrics_archive }}"
+    dest: "{{ victoriametrics_source_dir }}"
+    remote_src: true
+    creates: "{{ victoriametrics_source_dir }}/victoria-metrics-prod"
+
+- name: Install VictoriaMetrics binary
+  ansible.builtin.copy:
+    src: "{{ victoriametrics_source_dir }}/victoria-metrics-prod"
+    dest: /usr/local/bin/victoria-metrics-prod
+    remote_src: true
+    owner: root
+    group: root
+    mode: '0755'
+  notify: restart_victoriametrics
+
+- name: Install VictoriaMetrics scrape configuration
+  ansible.builtin.template:
+    src: scrape.yml.j2
+    dest: /etc/victoria-metrics/scrape.yml
+    owner: root
+    group: victoriametrics
+    mode: '0640'
+  notify: restart_victoriametrics
+
+- name: Install VictoriaMetrics systemd service
+  ansible.builtin.template:
+    src: victoriametrics.service.j2
+    dest: /etc/systemd/system/victoriametrics.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify: restart_victoriametrics
+
+- name: Enable and start VictoriaMetrics
+  ansible.builtin.systemd:
+    name: victoriametrics.service
+    state: started
+    enabled: true
+    daemon_reload: true
+
+- name: Create Grafana APT keyring directory
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Install Grafana repository signing key
+  ansible.builtin.get_url:
+    url: https://apt.grafana.com/gpg-full.key
+    dest: /etc/apt/keyrings/grafana.asc
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Configure Grafana stable repository
+  ansible.builtin.copy:
+    dest: /etc/apt/sources.list.d/grafana.list
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      deb [signed-by=/etc/apt/keyrings/grafana.asc] https://apt.grafana.com stable main
+
+- name: Install Grafana OSS
+  ansible.builtin.apt:
+    name: grafana
+    state: present
+    update_cache: true
+
+- name: Create Grafana systemd override directory
+  ansible.builtin.file:
+    path: /etc/systemd/system/grafana-server.service.d
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Configure Grafana private listener behind the ACME proxy
+  ansible.builtin.template:
+    src: grafana-override.conf.j2
+    dest: /etc/systemd/system/grafana-server.service.d/override.conf
+    owner: root
+    group: root
+    mode: '0644'
+  notify: restart_grafana
+
+- name: Create managed Grafana dashboard directory
+  ansible.builtin.file:
+    path: /var/lib/grafana/dashboards
+    state: directory
+    owner: grafana
+    group: grafana
+    mode: '0755'
+
+- name: Provision VictoriaMetrics datasource
+  ansible.builtin.template:
+    src: grafana-datasource.yml.j2
+    dest: /etc/grafana/provisioning/datasources/victoriametrics.yml
+    owner: root
+    group: grafana
+    mode: '0640'
+  notify: restart_grafana
+
+- name: Provision VPN dashboard provider
+  ansible.builtin.template:
+    src: grafana-dashboard-provider.yml.j2
+    dest: /etc/grafana/provisioning/dashboards/vpn.yml
+    owner: root
+    group: grafana
+    mode: '0640'
+  notify: restart_grafana
+
+- name: Install VPN performance dashboard
+  ansible.builtin.copy:
+    src: vpn-performance.json
+    dest: /var/lib/grafana/dashboards/vpn-performance.json
+    owner: grafana
+    group: grafana
+    mode: '0644'
+  notify: restart_grafana
+
+- name: Enable and start Grafana
+  ansible.builtin.systemd:
+    name: grafana-server.service
+    state: started
+    enabled: true
+    daemon_reload: true
+
+- ansible.builtin.meta: flush_handlers

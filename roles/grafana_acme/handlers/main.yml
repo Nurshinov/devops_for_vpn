@@ -1,0 +1,5 @@
+---
+- name: reload_nginx_for_grafana
+  ansible.builtin.systemd:
+    name: nginx.service
+    state: reloaded

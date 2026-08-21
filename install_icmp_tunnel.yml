@@ -1,0 +1,20 @@
+---
+- name: Install the ICMP tunnel server in Helsinki
+  hosts: hetzner
+  become: true
+  serial: 1
+  vars:
+    hans_tunnel_mode: server
+  roles:
+    - hans_tunnel
+
+- name: Install the ICMP tunnel client in Moscow
+  hosts: firstvds
+  become: true
+  serial: 1
+  vars:
+    hans_tunnel_mode: client
+    hans_tunnel_server_address: "{{ hostvars[groups['hetzner'] | first].ansible_host | default(groups['hetzner'] | first) }}"
+    hans_tunnel_password: "{{ hostvars[groups['hetzner'] | first].hans_tunnel_effective_password }}"
+  roles:
+    - hans_tunnel

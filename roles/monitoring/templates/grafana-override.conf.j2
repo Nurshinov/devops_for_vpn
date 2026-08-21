@@ -1,0 +1,6 @@
+[Service]
+Environment=GF_SERVER_HTTP_ADDR={{ grafana_listen_address }}
+Environment=GF_SERVER_HTTP_PORT={{ grafana_listen_port }}
+Environment=GF_SERVER_PROTOCOL={{ grafana_protocol }}
+Environment=GF_SERVER_DOMAIN={{ grafana_public_host }}
+Environment=GF_SERVER_ROOT_URL=https://{{ grafana_public_host }}/

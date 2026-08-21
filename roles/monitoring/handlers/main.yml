@@ -1,0 +1,12 @@
+---
+- name: restart_victoriametrics
+  ansible.builtin.systemd:
+    name: victoriametrics.service
+    state: restarted
+    daemon_reload: true
+
+- name: restart_grafana
+  ansible.builtin.systemd:
+    name: grafana-server.service
+    state: restarted
+    daemon_reload: true

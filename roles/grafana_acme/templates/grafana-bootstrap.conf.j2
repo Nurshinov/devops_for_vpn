@@ -1,0 +1,14 @@
+server {
+  listen 80;
+  listen [::]:80;
+  server_name {{ grafana_acme_domain }};
+
+  location ^~ /.well-known/acme-challenge/ {
+    root {{ grafana_acme_webroot }};
+    default_type text/plain;
+  }
+
+  location / {
+    return 503;
+  }
+}

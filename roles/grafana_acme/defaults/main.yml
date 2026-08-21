@@ -1,0 +1,5 @@
+---
+grafana_acme_domain: grafana.157-180-39-82.sslip.io
+grafana_acme_webroot: /var/www/grafana-acme
+grafana_acme_certificate_dir: "/etc/letsencrypt/live/{{ grafana_acme_domain }}"
+grafana_acme_backend: http://127.0.0.1:3000

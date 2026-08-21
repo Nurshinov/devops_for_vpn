@@ -1,0 +1,168 @@
+---
+- name: Validate ICMP tunnel settings
+  ansible.builtin.assert:
+    that:
+      - hans_tunnel_mode in ['server', 'client']
+      - hans_tunnel_mode != 'client' or hans_tunnel_server_address | length > 0
+      - hans_tunnel_mtu | int >= 576
+    fail_msg: The ICMP tunnel mode, server address, or MTU is invalid
+
+- name: Install the ICMP tunnel secret generator
+  ansible.builtin.apt:
+    name: openssl
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Check for an existing ICMP tunnel secret
+  ansible.builtin.stat:
+    path: /etc/hans-tunnel.env
+  register: hans_tunnel_secret_file
+
+- name: Read the existing ICMP tunnel secret
+  ansible.builtin.slurp:
+    src: /etc/hans-tunnel.env
+  register: hans_tunnel_existing_secret
+  when: hans_tunnel_secret_file.stat.exists
+  no_log: true
+
+- name: Generate the ICMP tunnel secret on the server when absent
+  ansible.builtin.command: openssl rand -hex 32
+  register: hans_tunnel_generated_secret
+  changed_when: true
+  when:
+    - hans_tunnel_mode == 'server'
+    - not hans_tunnel_secret_file.stat.exists
+  no_log: true
+
+- name: Select the effective ICMP tunnel secret
+  ansible.builtin.set_fact:
+    hans_tunnel_effective_password: >-
+      {{
+        ((hans_tunnel_existing_secret.content | b64decode)
+          | regex_replace('^HANS_TUNNEL_PASSWORD=', '') | trim)
+        if hans_tunnel_secret_file.stat.exists
+        else (hans_tunnel_generated_secret.stdout
+          if hans_tunnel_mode == 'server' else hans_tunnel_password)
+      }}
+  no_log: true
+
+- name: Validate the effective ICMP tunnel secret
+  ansible.builtin.assert:
+    that:
+      - hans_tunnel_effective_password | length >= 32
+      - hans_tunnel_effective_password | length <= 128
+      - (hans_tunnel_effective_password | regex_search('^[A-Za-z0-9._-]+$')) is not none
+    fail_msg: The host ICMP tunnel secret must contain 32-128 safe ASCII characters
+  no_log: true
+
+- name: Verify that an existing client secret matches Helsinki
+  ansible.builtin.assert:
+    that:
+      - hans_tunnel_effective_password == hans_tunnel_password
+    fail_msg: The existing Moscow ICMP tunnel secret differs from the Helsinki source of truth
+  when:
+    - hans_tunnel_mode == 'client'
+    - hans_tunnel_secret_file.stat.exists
+  no_log: true
+
+- name: Install ICMP tunnel build dependencies
+  ansible.builtin.apt:
+    name:
+      - build-essential
+      - ca-certificates
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Create Hans source directory
+  ansible.builtin.file:
+    path: "{{ hans_tunnel_source_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Download pinned Hans source
+  ansible.builtin.get_url:
+    url: "{{ hans_tunnel_download_url }}"
+    dest: "/usr/local/src/hans-{{ hans_tunnel_version }}.tar.gz"
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Extract pinned Hans source
+  ansible.builtin.unarchive:
+    src: "/usr/local/src/hans-{{ hans_tunnel_version }}.tar.gz"
+    dest: "{{ hans_tunnel_source_dir }}"
+    remote_src: true
+    extra_opts:
+      - --strip-components=1
+    creates: "{{ hans_tunnel_source_dir }}/Makefile"
+
+- name: Normalize Hans build helper line endings
+  ansible.builtin.replace:
+    path: "{{ hans_tunnel_source_dir }}/osflags"
+    regexp: '\r$'
+    replace: ''
+
+- name: Build Hans
+  ansible.builtin.command: make
+  args:
+    chdir: "{{ hans_tunnel_source_dir }}"
+    creates: "{{ hans_tunnel_source_dir }}/hans"
+
+- name: Install Hans binary
+  ansible.builtin.copy:
+    src: "{{ hans_tunnel_source_dir }}/hans"
+    dest: "{{ hans_tunnel_binary }}"
+    remote_src: true
+    owner: root
+    group: root
+    mode: '0755'
+  notify: restart_hans_tunnel
+
+- name: Install root-only ICMP tunnel password
+  ansible.builtin.template:
+    src: hans-tunnel.env.j2
+    dest: /etc/hans-tunnel.env
+    owner: root
+    group: root
+    mode: '0600'
+  no_log: true
+  notify: restart_hans_tunnel
+
+- name: Let Hans handle ICMP echo replies on the tunnel server
+  ansible.builtin.copy:
+    dest: /etc/sysctl.d/90-hans-tunnel.conf
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      net.ipv4.icmp_echo_ignore_all = 1
+  when: hans_tunnel_mode == 'server'
+  notify: restart_hans_tunnel
+
+- name: Apply ICMP echo setting on the tunnel server
+  ansible.builtin.command: sysctl -w net.ipv4.icmp_echo_ignore_all=1
+  register: hans_tunnel_sysctl
+  changed_when: "' = 1' not in hans_tunnel_sysctl.stdout"
+  when: hans_tunnel_mode == 'server'
+
+- name: Install ICMP tunnel systemd service
+  ansible.builtin.template:
+    src: hans-tunnel.service.j2
+    dest: /etc/systemd/system/hans-tunnel.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify: restart_hans_tunnel
+
+- name: Enable and start ICMP tunnel
+  ansible.builtin.systemd:
+    name: hans-tunnel.service
+    state: started
+    enabled: true
+    daemon_reload: true
+
+- ansible.builtin.meta: flush_handlers

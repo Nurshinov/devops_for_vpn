@@ -1,0 +1,119 @@
+---
+- name: Resolve the Grafana ACME domain
+  ansible.builtin.command: "getent ahostsv4 {{ grafana_acme_domain }}"
+  register: grafana_acme_dns
+  changed_when: false
+
+- name: Validate the Grafana ACME DNS target
+  ansible.builtin.assert:
+    that:
+      - (ansible_host | default(inventory_hostname)) in grafana_acme_dns.stdout
+    fail_msg: >-
+      {{ grafana_acme_domain }} must resolve to
+      {{ ansible_host | default(inventory_hostname) }} before requesting a certificate
+
+- name: Install nginx and Certbot
+  ansible.builtin.apt:
+    name:
+      - nginx
+      - certbot
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Create ACME webroot
+  ansible.builtin.file:
+    path: "{{ grafana_acme_webroot }}/.well-known/acme-challenge"
+    state: directory
+    owner: www-data
+    group: www-data
+    mode: '0755'
+
+- name: Check for an existing Let's Encrypt certificate
+  ansible.builtin.stat:
+    path: "{{ grafana_acme_certificate_dir }}/fullchain.pem"
+  register: grafana_acme_certificate
+
+- name: Install bootstrap HTTP configuration
+  ansible.builtin.template:
+    src: grafana-bootstrap.conf.j2
+    dest: /etc/nginx/sites-available/grafana.conf
+    owner: root
+    group: root
+    mode: '0644'
+  when: not grafana_acme_certificate.stat.exists
+
+- name: Enable the Grafana nginx site
+  ansible.builtin.file:
+    src: /etc/nginx/sites-available/grafana.conf
+    dest: /etc/nginx/sites-enabled/grafana.conf
+    state: link
+    force: true
+
+- name: Disable the nginx default site
+  ansible.builtin.file:
+    path: /etc/nginx/sites-enabled/default
+    state: absent
+
+- name: Validate bootstrap nginx configuration
+  ansible.builtin.command: nginx -t
+  changed_when: false
+  when: not grafana_acme_certificate.stat.exists
+
+- name: Start nginx for the ACME challenge
+  ansible.builtin.systemd:
+    name: nginx.service
+    state: restarted
+    enabled: true
+  when: not grafana_acme_certificate.stat.exists
+
+- name: Obtain the Grafana Let's Encrypt certificate
+  ansible.builtin.command:
+    argv:
+      - certbot
+      - certonly
+      - --webroot
+      - --webroot-path
+      - "{{ grafana_acme_webroot }}"
+      - --domain
+      - "{{ grafana_acme_domain }}"
+      - --non-interactive
+      - --agree-tos
+      - --register-unsafely-without-email
+  args:
+    creates: "{{ grafana_acme_certificate_dir }}/fullchain.pem"
+
+- name: Install Grafana HTTPS reverse proxy
+  ansible.builtin.template:
+    src: grafana.conf.j2
+    dest: /etc/nginx/sites-available/grafana.conf
+    owner: root
+    group: root
+    mode: '0644'
+  notify: reload_nginx_for_grafana
+
+- name: Install nginx reload hook for renewed certificates
+  ansible.builtin.copy:
+    dest: /etc/letsencrypt/renewal-hooks/deploy/reload-nginx
+    owner: root
+    group: root
+    mode: '0755'
+    content: |
+      #!/bin/sh
+      systemctl reload nginx.service
+
+- name: Validate final nginx configuration
+  ansible.builtin.command: nginx -t
+  changed_when: false
+
+- name: Enable nginx and Certbot renewal timer
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    state: started
+    enabled: true
+    daemon_reload: true
+  loop:
+    - nginx.service
+    - certbot.timer
+
+- ansible.builtin.meta: flush_handlers

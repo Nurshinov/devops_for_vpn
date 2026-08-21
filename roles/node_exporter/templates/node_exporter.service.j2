@@ -1,0 +1,22 @@
+[Unit]
+Description=Prometheus Node Exporter
+After=network-online.target hans-tunnel.service
+Wants=network-online.target hans-tunnel.service
+
+[Service]
+Type=simple
+User=node_exporter
+Group=node_exporter
+ExecStart=/usr/local/bin/node_exporter \
+  --web.listen-address={{ node_exporter_listen_address }}:{{ node_exporter_port }} \
+  --collector.systemd \
+  --collector.systemd.unit-include='^(hans-tunnel|openvpn-server@server|nginx|victoriametrics|grafana-server).service$'
+Restart=always
+RestartSec=3s
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

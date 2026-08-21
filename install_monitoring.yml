@@ -1,0 +1,18 @@
+---
+- name: Install node exporter on both VPN hosts
+  hosts: hetzner:firstvds
+  become: true
+  serial: 1
+  vars:
+    node_exporter_listen_address: >-
+      {{ '10.254.0.1' if inventory_hostname in groups['hetzner'] else '10.254.0.2' }}
+  roles:
+    - node_exporter
+
+- name: Install VictoriaMetrics and Grafana in Helsinki
+  hosts: hetzner
+  become: true
+  serial: 1
+  roles:
+    - monitoring
+    - grafana_acme

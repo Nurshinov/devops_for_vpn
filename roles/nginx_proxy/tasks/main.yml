@@ -1,0 +1,76 @@
+---
+- name: Validate proxy variables
+  ansible.builtin.assert:
+    that:
+      - nginx_proxy_upstream_host | length > 0
+      - nginx_proxy_listen_port | int > 0
+      - nginx_proxy_upstream_port | int > 0
+    fail_msg: nginx_proxy_upstream_host and valid proxy ports are required
+
+- name: Install nginx with stream support
+  ansible.builtin.apt:
+    name:
+      - nginx
+      - libnginx-mod-stream
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Create nginx stream configuration directory
+  ansible.builtin.file:
+    path: "{{ nginx_proxy_stream_config_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Install OpenVPN UDP proxy configuration
+  ansible.builtin.template:
+    src: openvpn-stream.conf.j2
+    dest: "{{ nginx_proxy_stream_config_dir }}/openvpn.conf"
+    owner: root
+    group: root
+    mode: '0644'
+  notify: reload_nginx
+
+- name: Read nginx main configuration
+  ansible.builtin.slurp:
+    src: "{{ nginx_proxy_main_config }}"
+  register: nginx_proxy_main_config_contents
+
+- name: Include managed proxy configuration in the existing stream context
+  ansible.builtin.lineinfile:
+    path: "{{ nginx_proxy_main_config }}"
+    regexp: '^[ \t]*include[ \t]+{{ nginx_proxy_stream_config_dir | regex_escape }}/\*\.conf;'
+    insertafter: '^[ \t]*stream[ \t]*\{'
+    line: "  include {{ nginx_proxy_stream_config_dir }}/*.conf;"
+  when: >-
+    (nginx_proxy_main_config_contents.content | b64decode |
+    regex_search('(?m)^stream\s*\{')) is not none
+  notify: reload_nginx
+
+- name: Create a stream context when nginx does not have one
+  ansible.builtin.blockinfile:
+    path: "{{ nginx_proxy_main_config }}"
+    marker: "# {mark} ANSIBLE MANAGED OPENVPN STREAM"
+    insertafter: EOF
+    block: |
+      stream {
+        include {{ nginx_proxy_stream_config_dir }}/*.conf;
+      }
+  when: >-
+    (nginx_proxy_main_config_contents.content | b64decode |
+    regex_search('(?m)^stream\s*\{')) is none
+  notify: reload_nginx
+
+- name: Validate nginx configuration
+  ansible.builtin.command: nginx -t
+  changed_when: false
+
+- name: Enable and start nginx
+  ansible.builtin.systemd:
+    name: nginx.service
+    state: started
+    enabled: true
+
+- ansible.builtin.meta: flush_handlers

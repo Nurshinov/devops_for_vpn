@@ -1,0 +1,6 @@
+---
+- name: restart_hans_tunnel
+  ansible.builtin.systemd:
+    name: hans-tunnel.service
+    state: restarted
+    daemon_reload: true

@@ -1,14 +1,27 @@
 ---
 - name: Detect default interface
-  set_fact:
+  ansible.builtin.set_fact:
     openvpn_iface: "{{ ansible_facts['default_ipv4']['interface'] }}"
 
-- name: Enable ip_forward
-  ansible.posix.sysctl:
-    name: net.ipv4.ip_forward
-    value: '1'
-    state: present
-    reload: true
+- name: Persist IPv4 forwarding
+  ansible.builtin.copy:
+    dest: /etc/sysctl.d/99-openvpn-forward.conf
+    content: |
+      net.ipv4.ip_forward = 1
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Read runtime IPv4 forwarding state
+  ansible.builtin.command: sysctl -n net.ipv4.ip_forward
+  register: openvpn_ip_forward
+  changed_when: false
+  check_mode: false
+
+- name: Enable runtime IPv4 forwarding
+  ansible.builtin.command: sysctl -w net.ipv4.ip_forward=1
+  when: openvpn_ip_forward.stdout | trim != '1'
+  changed_when: true
 
 - name: Install packages
   ansible.builtin.package:
@@ -18,11 +31,23 @@
     state: present
     update_cache: true
 
+- name: Stop conflicting generic OpenVPN instance
+  ansible.builtin.systemd:
+    name: openvpn@server.service
+    state: stopped
+
+- name: Mask conflicting generic OpenVPN instance
+  ansible.builtin.systemd:
+    name: openvpn@server.service
+    masked: true
+
 - name: Copy certs
   ansible.builtin.copy:
     src: certs
     dest: "{{ openvpn_working_dir }}"
     mode: '0600'
+  tags:
+    - openvpn_secrets
   notify:
     - restart_openvpn
 
@@ -43,15 +68,32 @@
 - name: Create systemd service for iptables rules
   ansible.builtin.template:
     src: openvpn-iptables.service.j2
-    dest: /lib/systemd/system/openvpn-iptables.service
+    dest: /etc/systemd/system/openvpn-iptables.service
+    owner: root
+    group: root
+    mode: '0644'
   notify:
     - restart_iptables
 
 - name: Create systemd service for openvpn
   ansible.builtin.template:
     src: openvpn-server@server.service.j2
-    dest: /lib/systemd/system/openvpn-server@server.service
+    dest: /etc/systemd/system/openvpn-server@server.service
+    owner: root
+    group: root
+    mode: '0644'
   notify:
+    - restart_openvpn
+
+- name: Remove role-managed units from the vendor directory
+  ansible.builtin.file:
+    path: "/lib/systemd/system/{{ item }}"
+    state: absent
+  loop:
+    - openvpn-iptables.service
+    - openvpn-server@server.service
+  notify:
+    - restart_iptables
     - restart_openvpn
 
 - ansible.builtin.meta: flush_handlers
@@ -63,5 +105,5 @@
     enabled: true
     force: true
   loop:
-    - "openvpn-server@server"
-    - "openvpn-iptables"
+    - openvpn-server@server
+    - openvpn-iptables

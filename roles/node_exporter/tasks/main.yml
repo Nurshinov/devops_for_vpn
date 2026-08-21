@@ -1,0 +1,57 @@
+---
+- name: Validate node exporter settings
+  ansible.builtin.assert:
+    that:
+      - node_exporter_listen_address | length > 0
+      - node_exporter_port | int > 0
+
+- name: Create node exporter system user
+  ansible.builtin.user:
+    name: node_exporter
+    system: true
+    shell: /usr/sbin/nologin
+    create_home: false
+
+- name: Download pinned node exporter archive
+  ansible.builtin.get_url:
+    url: "{{ node_exporter_download_url }}"
+    dest: "/usr/local/src/{{ node_exporter_archive }}"
+    checksum: "sha256:{{ node_exporter_checksum }}"
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Extract pinned node exporter archive
+  ansible.builtin.unarchive:
+    src: "/usr/local/src/{{ node_exporter_archive }}"
+    dest: /usr/local/src
+    remote_src: true
+    creates: "{{ node_exporter_source_dir }}/node_exporter"
+
+- name: Install node exporter binary
+  ansible.builtin.copy:
+    src: "{{ node_exporter_source_dir }}/node_exporter"
+    dest: /usr/local/bin/node_exporter
+    remote_src: true
+    owner: root
+    group: root
+    mode: '0755'
+  notify: restart_node_exporter
+
+- name: Install node exporter systemd service
+  ansible.builtin.template:
+    src: node_exporter.service.j2
+    dest: /etc/systemd/system/node_exporter.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify: restart_node_exporter
+
+- name: Enable and start node exporter
+  ansible.builtin.systemd:
+    name: node_exporter.service
+    state: started
+    enabled: true
+    daemon_reload: true
+
+- ansible.builtin.meta: flush_handlers

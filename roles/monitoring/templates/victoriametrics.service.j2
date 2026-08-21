@@ -1,0 +1,25 @@
+[Unit]
+Description=VictoriaMetrics single-node time series database
+After=network-online.target hans-tunnel.service node_exporter.service
+Wants=network-online.target hans-tunnel.service node_exporter.service
+
+[Service]
+Type=simple
+User=victoriametrics
+Group=victoriametrics
+ExecStart=/usr/local/bin/victoria-metrics-prod \
+  -storageDataPath={{ victoriametrics_storage_path }} \
+  -retentionPeriod={{ victoriametrics_retention }} \
+  -httpListenAddr={{ victoriametrics_listen_address }} \
+  -promscrape.config=/etc/victoria-metrics/scrape.yml \
+  -selfScrapeInterval=15s
+Restart=always
+RestartSec=3s
+LimitNOFILE=1048576
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target

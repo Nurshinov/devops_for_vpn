@@ -1,0 +1,8 @@
+---
+nginx_proxy_listen_port: 11999
+nginx_proxy_upstream_host: ""
+nginx_proxy_upstream_port: 11999
+nginx_proxy_timeout: 1h
+
+nginx_proxy_main_config: /etc/nginx/nginx.conf
+nginx_proxy_stream_config_dir: /etc/nginx/stream-conf.d

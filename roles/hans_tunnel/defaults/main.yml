@@ -1,0 +1,15 @@
+---
+hans_tunnel_version: c79f12ffa2e1c344ce4b49a36c10cd980fd52b67
+hans_tunnel_download_url: "https://github.com/friedrich/hans/archive/{{ hans_tunnel_version }}.tar.gz"
+hans_tunnel_source_dir: "/usr/local/src/hans-{{ hans_tunnel_version }}"
+hans_tunnel_binary: /usr/local/sbin/hans
+
+hans_tunnel_mode: ""
+hans_tunnel_password: ""
+hans_tunnel_server_address: ""
+hans_tunnel_network: 10.254.0.0
+hans_tunnel_server_ip: 10.254.0.1
+hans_tunnel_client_ip: 10.254.0.2
+hans_tunnel_device: hans0
+hans_tunnel_mtu: 1400
+hans_tunnel_client_polls: 10
