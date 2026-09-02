@@ -1,0 +1,19 @@
+---
+- name: Install the Helsinki Cloudflare Tunnel and OpenVPN UDP backend
+  hosts: hetzner
+  become: true
+  vars_files:
+    - vars/cloudflare_vault.yml
+  vars:
+    cloudflare_transport_mode: backend
+  roles:
+    - cloudflare_transport
+
+- name: Install the Moscow OpenVPN UDP frontend over Cloudflare
+  hosts: firstvds
+  become: true
+  serial: 1
+  vars:
+    cloudflare_transport_mode: frontend
+  roles:
+    - cloudflare_transport

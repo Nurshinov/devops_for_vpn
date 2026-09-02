@@ -1,0 +1,18 @@
+[Unit]
+Description=Firewall rules for the Cloudflare OpenVPN UDP backend
+After=network-online.target
+Before=openvpn-server@server-cf.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=true
+ExecStart=/bin/sh -c '/usr/sbin/iptables -t nat -C POSTROUTING -s {{ cloudflare_backend_network }} -o {{ cloudflare_backend_egress_iface }} -j MASQUERADE 2>/dev/null || /usr/sbin/iptables -t nat -A POSTROUTING -s {{ cloudflare_backend_network }} -o {{ cloudflare_backend_egress_iface }} -j MASQUERADE'
+ExecStart=/bin/sh -c '/usr/sbin/iptables -C FORWARD -s {{ cloudflare_backend_network }} -j ACCEPT 2>/dev/null || /usr/sbin/iptables -A FORWARD -s {{ cloudflare_backend_network }} -j ACCEPT'
+ExecStart=/bin/sh -c '/usr/sbin/iptables -C FORWARD -d {{ cloudflare_backend_network }} -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || /usr/sbin/iptables -A FORWARD -d {{ cloudflare_backend_network }} -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT'
+ExecStop=/bin/sh -c '/usr/sbin/iptables -t nat -C POSTROUTING -s {{ cloudflare_backend_network }} -o {{ cloudflare_backend_egress_iface }} -j MASQUERADE 2>/dev/null && /usr/sbin/iptables -t nat -D POSTROUTING -s {{ cloudflare_backend_network }} -o {{ cloudflare_backend_egress_iface }} -j MASQUERADE || true'
+ExecStop=/bin/sh -c '/usr/sbin/iptables -C FORWARD -s {{ cloudflare_backend_network }} -j ACCEPT 2>/dev/null && /usr/sbin/iptables -D FORWARD -s {{ cloudflare_backend_network }} -j ACCEPT || true'
+ExecStop=/bin/sh -c '/usr/sbin/iptables -C FORWARD -d {{ cloudflare_backend_network }} -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null && /usr/sbin/iptables -D FORWARD -d {{ cloudflare_backend_network }} -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT || true'
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,13 @@
+[Unit]
+Description=Cloudflare Access stream bridge to the Helsinki UDP relay
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/cloudflared access tcp --hostname {{ cloudflare_hostname }} --url {{ cloudflare_frontend_local_bind }}:{{ cloudflare_frontend_local_port }} --loglevel info
+Restart=always
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target

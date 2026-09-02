@@ -1,0 +1,337 @@
+---
+- name: Validate Cloudflare transport variables
+  ansible.builtin.assert:
+    that:
+      - cloudflare_transport_mode in ['backend', 'frontend']
+      - cloudflare_hostname | length > 0
+      - cloudflare_backend_relay_port | int > 0
+      - cloudflare_backend_openvpn_port | int > 0
+      - cloudflare_frontend_listen_port | int > 0
+      - cloudflare_frontend_local_port | int > 0
+      - cloudflare_transport_mode != 'backend' or cloudflare_tunnel_token | default('') | length > 0
+    fail_msg: A valid mode, hostname, ports, and backend tunnel token are required
+
+- name: Detect the backend egress interface
+  ansible.builtin.set_fact:
+    cloudflare_backend_egress_iface: "{{ ansible_facts['default_ipv4']['interface'] }}"
+  when: cloudflare_transport_mode == 'backend'
+
+- name: Download pinned cloudflared package
+  ansible.builtin.get_url:
+    url: "{{ cloudflared_deb_url | replace(' ', '') }}"
+    dest: "/tmp/cloudflared-{{ cloudflared_version }}-linux-amd64.deb"
+    checksum: "{{ cloudflared_deb_checksum }}"
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Install cloudflared package
+  ansible.builtin.apt:
+    deb: "/tmp/cloudflared-{{ cloudflared_version }}-linux-amd64.deb"
+    state: present
+
+- name: Download pinned GOST archive
+  ansible.builtin.get_url:
+    url: "{{ gost_archive_url | replace(' ', '') }}"
+    dest: "/tmp/gost-{{ gost_version }}-linux-amd64.tar.gz"
+    checksum: "{{ gost_archive_checksum }}"
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Ensure the GOST source directory exists
+  ansible.builtin.file:
+    path: "/usr/local/src/gost-{{ gost_version }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Extract the pinned GOST archive
+  ansible.builtin.unarchive:
+    src: "/tmp/gost-{{ gost_version }}-linux-amd64.tar.gz"
+    dest: "/usr/local/src/gost-{{ gost_version }}"
+    remote_src: true
+    creates: "/usr/local/src/gost-{{ gost_version }}/gost"
+
+- name: Install the GOST binary
+  ansible.builtin.copy:
+    src: "/usr/local/src/gost-{{ gost_version }}/gost"
+    dest: /usr/local/bin/gost
+    remote_src: true
+    owner: root
+    group: root
+    mode: '0755'
+  notify:
+    - restart_gost_backend
+    - restart_gost_frontend
+
+- name: Gather service state for cleanup
+  ansible.builtin.service_facts:
+
+- name: Configure the Helsinki backend
+  when: cloudflare_transport_mode == 'backend'
+  block:
+    - name: Install OpenVPN backend packages
+      ansible.builtin.apt:
+        name:
+          - iptables
+          - openvpn
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Persist backend IPv4 forwarding
+      ansible.builtin.copy:
+        dest: /etc/sysctl.d/99-cloudflare-openvpn-forward.conf
+        content: |
+          net.ipv4.ip_forward = 1
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Read runtime IPv4 forwarding state
+      ansible.builtin.command: sysctl -n net.ipv4.ip_forward
+      register: cloudflare_ipv4_forward
+      changed_when: false
+      check_mode: false
+
+    - name: Enable runtime IPv4 forwarding
+      ansible.builtin.command: sysctl -w net.ipv4.ip_forward=1
+      when: cloudflare_ipv4_forward.stdout | trim != '1'
+      changed_when: true
+
+    - name: Ensure OpenVPN server configuration directory exists
+      ansible.builtin.file:
+        path: /etc/openvpn/server
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Ensure OpenVPN certificate directory exists
+      ansible.builtin.file:
+        path: /etc/openvpn/certs
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+
+    - name: Install OpenVPN certificates and keys
+      ansible.builtin.copy:
+        src: certs/
+        dest: /etc/openvpn/certs/
+        owner: root
+        group: root
+        mode: preserve
+      notify: restart_cloudflare_openvpn
+
+    - name: Ensure OpenVPN log directory exists
+      ansible.builtin.file:
+        path: /var/log/openvpn
+        state: directory
+        owner: root
+        group: root
+        mode: '0750'
+
+    - name: Install the Helsinki OpenVPN UDP configuration
+      ansible.builtin.template:
+        src: openvpn-server-cf.conf.j2
+        dest: /etc/openvpn/server/server-cf.conf
+        owner: root
+        group: root
+        mode: '0600'
+      notify: restart_cloudflare_openvpn
+
+    - name: Remove obsolete OpenVPN configuration location
+      ansible.builtin.file:
+        path: /etc/openvpn/server-cf.conf
+        state: absent
+
+    - name: Ensure Cloudflare configuration directory exists
+      ansible.builtin.file:
+        path: /etc/cloudflared
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+
+    - name: Install Cloudflare tunnel token
+      ansible.builtin.copy:
+        content: "{{ cloudflare_tunnel_token }}\n"
+        dest: /etc/cloudflared/tunnel-token
+        owner: root
+        group: root
+        mode: '0600'
+      no_log: true
+      notify: restart_cloudflare_tunnel
+
+    - name: Remove obsolete locally managed tunnel credentials
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/cloudflared/config.yml
+        - /etc/cloudflared/credentials.json
+
+    - name: Install the Helsinki GOST relay service
+      ansible.builtin.template:
+        src: gost-cloudflare-backend.service.j2
+        dest: /etc/systemd/system/gost-cloudflare-backend.service
+        owner: root
+        group: root
+        mode: '0644'
+      notify: restart_gost_backend
+
+    - name: Install Cloudflare tunnel service
+      ansible.builtin.template:
+        src: cloudflared-tunnel.service.j2
+        dest: /etc/systemd/system/cloudflared-tunnel.service
+        owner: root
+        group: root
+        mode: '0644'
+      notify: restart_cloudflare_tunnel
+
+    - name: Install OpenVPN UDP firewall service
+      ansible.builtin.template:
+        src: openvpn-cf-iptables.service.j2
+        dest: /etc/systemd/system/openvpn-cf-iptables.service
+        owner: root
+        group: root
+        mode: '0644'
+      notify: restart_cloudflare_openvpn_firewall
+
+    - name: Remove obsolete NAT and forwarding rules for 10.0.1.0/24
+      ansible.builtin.command:
+        argv: "{{ item }}"
+      loop:
+        - [iptables, -t, nat, -D, POSTROUTING, -s, 10.0.1.0/24, -o, "{{ cloudflare_backend_egress_iface }}", -j, MASQUERADE]
+        - [iptables, -D, FORWARD, -s, 10.0.1.0/24, -j, ACCEPT]
+        - [iptables, -D, FORWARD, -d, 10.0.1.0/24, -m, conntrack, --ctstate, 'RELATED,ESTABLISHED', -j, ACCEPT]
+      register: cloudflare_old_firewall_rule
+      changed_when: cloudflare_old_firewall_rule.rc == 0
+      failed_when: false
+
+    - name: Apply backend service changes before startup
+      ansible.builtin.meta: flush_handlers
+
+    - name: Start the Helsinki Cloudflare UDP relay services
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        state: started
+        enabled: true
+        daemon_reload: true
+      loop:
+        - openvpn-cf-iptables.service
+        - openvpn-server@server-cf.service
+        - gost-cloudflare-backend.service
+        - cloudflared-tunnel.service
+
+- name: Configure the Moscow frontend
+  when: cloudflare_transport_mode == 'frontend'
+  block:
+    - name: Install Moscow Cloudflare Access TCP service
+      ansible.builtin.template:
+        src: cloudflared-access-tcp.service.j2
+        dest: /etc/systemd/system/cloudflared-access-tcp.service
+        owner: root
+        group: root
+        mode: '0644'
+      notify: restart_cloudflare_access_tcp
+
+    - name: Install Moscow GOST UDP frontend service
+      ansible.builtin.template:
+        src: gost-cloudflare-frontend.service.j2
+        dest: /etc/systemd/system/gost-cloudflare-frontend.service
+        owner: root
+        group: root
+        mode: '0644'
+      notify: restart_gost_frontend
+
+    - name: Remove obsolete nginx VPN stream proxies
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ cloudflare_nginx_stream_dir }}/openvpn-cloudflare.conf"
+        - "{{ cloudflare_nginx_stream_dir }}/openvpn.conf"
+      notify: reload_cloudflare_nginx
+
+    - name: Apply frontend service changes before startup
+      ansible.builtin.meta: flush_handlers
+
+    - name: Start the Moscow Cloudflare UDP frontend services
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        state: started
+        enabled: true
+        daemon_reload: true
+      loop:
+        - cloudflared-access-tcp.service
+        - gost-cloudflare-frontend.service
+
+    - name: Stop the obsolete Moscow node exporter
+      ansible.builtin.systemd:
+        name: node_exporter.service
+        state: stopped
+        enabled: false
+      when: "'node_exporter.service' in ansible_facts.services"
+
+    - name: Remove obsolete Moscow node exporter files
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/systemd/system/node_exporter.service
+        - /usr/local/bin/node_exporter
+        - /usr/local/src/node_exporter-1.12.1.linux-amd64
+        - /usr/local/src/node_exporter-1.12.1.linux-amd64.tar.gz
+
+    - name: Remove obsolete Moscow node exporter user
+      ansible.builtin.user:
+        name: node_exporter
+        state: absent
+        remove: false
+
+- name: Stop the legacy Hans tunnel
+  ansible.builtin.systemd:
+    name: hans-tunnel.service
+    state: stopped
+    enabled: false
+  when: "'hans-tunnel.service' in ansible_facts.services"
+
+- name: Stop legacy Helsinki OpenVPN services
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    state: stopped
+    enabled: false
+  loop:
+    - openvpn-server@server.service
+    - openvpn-iptables.service
+  when:
+    - cloudflare_transport_mode == 'backend'
+    - item in ansible_facts.services
+
+- name: Remove legacy Hans files
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/systemd/system/hans-tunnel.service
+    - /etc/hans-tunnel.env
+    - /etc/sysctl.d/90-hans-tunnel.conf
+    - /usr/local/sbin/hans
+    - "/usr/local/src/hans-{{ cloudflare_legacy_hans_version }}"
+    - "/usr/local/src/hans-{{ cloudflare_legacy_hans_version }}.tar.gz"
+
+- name: Remove legacy Helsinki OpenVPN files
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/systemd/system/openvpn-server@server.service
+    - /etc/systemd/system/openvpn-iptables.service
+    - /etc/systemd/system/openvpn@server.service
+    - /etc/openvpn/server.conf
+    - /etc/openvpn/ccd
+  when: cloudflare_transport_mode == 'backend'

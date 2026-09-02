@@ -1,41 +1,71 @@
-# Connect schema
+# OpenVPN UDP through Cloudflare
+
+## Active topology
 
 ```text
-Unchanged client config
-  -> Moscow nginx UDP/11999
-  -> Hans IPv4-over-ICMP tunnel (10.254.0.2 -> 10.254.0.1)
-  -> Helsinki OpenVPN UDP/11999
-  -> Internet
+Existing OpenVPN clients
+  -> 188.120.226.48:11999/UDP in Moscow
+  -> GOST UDP-to-Relay frontend
+  -> cloudflared access tcp on 127.0.0.1:12001
+  -> Cloudflare transport for nurshinov-vpn.com
+  -> named Cloudflare Tunnel in Helsinki
+  -> GOST Relay-to-UDP backend on 127.0.0.1:12000/TCP
+  -> OpenVPN on 127.0.0.1:11999/UDP (10.0.0.0/24)
+  -> Internet through 157.180.39.82
 ```
 
+The public client endpoint and `config.ovpn` remain unchanged. GOST preserves
+the UDP sessions while the Moscow-to-Helsinki leg is transported through the
+Cloudflare TCP/WebSocket path. Hans is not installed or used.
 
-# Usage 
+In Cloudflare Zero Trust, the published application route for
+`nurshinov-vpn.com` remains service type `TCP` with URL `localhost:12000`.
+
+## Deployment
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-ansible-playbook install_icmp_tunnel.yml -i inventory
-ansible-playbook install_openvpn.yml -i inventory
-ansible-playbook install_nginx.yml -i inventory
+
+ansible-playbook install_cloudflare_transport.yml -i inventory --vault-password-file .vault
 ansible-playbook install_monitoring.yml -i inventory
 ```
 
-The external firewall attached to the Hetzner server must allow inbound ICMP
-from the Moscow proxy (`188.120.226.48/32`). The client continues to use
-`188.120.226.48:11999/udp`; UDP/11999 does not need to pass directly between
-Moscow and Helsinki.
+The tunnel token is encrypted in `vars/cloudflare_vault.yml`. The local Vault
+password file `.vault` must remain mode `0600`.
 
-The first ICMP tunnel deployment generates `/etc/hans-tunnel.env` on Helsinki
-and synchronizes it to Moscow with mode `0600`. Later deployments reuse the
-secret already stored on Helsinki, so no CI secret is required.
+## Client
 
-VictoriaMetrics and the Grafana backend listen on localhost only. Grafana is
-published by nginx with an automatically renewed Let's Encrypt certificate:
+Use the existing `config.ovpn` with:
 
-```bash
-https://grafana.157-180-39-82.sslip.io/
+```text
+proto udp
+remote 188.120.226.48 11999
 ```
 
-The Hetzner Cloud Firewall only needs public TCP/80 and TCP/443 for this route.
-Keep Grafana port 3000 and VictoriaMetrics port 8428 private.
+The expected public IPv4 after connection is `157.180.39.82`.
+
+## Verification
+
+On Moscow:
+
+```bash
+systemctl is-active gost-cloudflare-frontend cloudflared-access-tcp
+ss -lunp | grep 11999
+ss -lntp | grep 12001
+```
+
+On Helsinki:
+
+```bash
+systemctl is-active cloudflared-tunnel gost-cloudflare-backend openvpn-server@server-cf openvpn-cf-iptables
+ss -lntp | grep 12000
+ss -lunp | grep 11999
+iptables -t nat -S POSTROUTING | grep 10.0.0.0/24
+```
+
+## Monitoring
+
+VictoriaMetrics, Grafana, and node_exporter run in Helsinki. Grafana remains
+available at `https://grafana.157-180-39-82.sslip.io/`.

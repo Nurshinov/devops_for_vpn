@@ -6,10 +6,6 @@ scrape_configs:
   - job_name: node_exporter
     static_configs:
       - targets:
-          - 10.254.0.1:9100
+          - 127.0.0.1:9100
         labels:
           location: helsinki
-      - targets:
-          - 10.254.0.2:9100
-        labels:
-          location: moscow

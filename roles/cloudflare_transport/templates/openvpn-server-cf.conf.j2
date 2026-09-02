@@ -1,0 +1,27 @@
+port {{ cloudflare_backend_openvpn_port }}
+proto udp
+local {{ cloudflare_backend_openvpn_bind }}
+dev {{ cloudflare_backend_device }}
+duplicate-cn
+topology subnet
+askpass /etc/openvpn/certs/.pass
+ca /etc/openvpn/certs/ca.crt
+cert /etc/openvpn/certs/server.crt
+key /etc/openvpn/certs/server.key
+dh /etc/openvpn/certs/dh.pem
+auth SHA256
+auth-nocache
+cipher AES-256-CBC
+data-ciphers AES-256-GCM:AES-128-GCM:AES-256-CBC
+data-ciphers-fallback AES-256-CBC
+tls-crypt /etc/openvpn/certs/tc.key
+server {{ cloudflare_backend_subnet }} {{ cloudflare_backend_mask }}
+client-to-client
+comp-lzo
+keepalive 10 120
+push "redirect-gateway def1"
+persist-key
+persist-tun
+status /var/log/openvpn/openvpn-cf-status.log
+log /var/log/openvpn/openvpn-cf.log
+verb 3

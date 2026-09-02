@@ -1,11 +1,10 @@
 ---
-- name: Install node exporter on both VPN hosts
-  hosts: hetzner:firstvds
+- name: Install node exporter on the Helsinki VPN host
+  hosts: hetzner
   become: true
   serial: 1
   vars:
-    node_exporter_listen_address: >-
-      {{ '10.254.0.1' if inventory_hostname in groups['hetzner'] else '10.254.0.2' }}
+    node_exporter_listen_address: 127.0.0.1
   roles:
     - node_exporter
 

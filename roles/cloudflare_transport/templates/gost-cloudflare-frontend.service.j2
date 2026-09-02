@@ -1,0 +1,14 @@
+[Unit]
+Description=GOST Moscow OpenVPN UDP frontend over Cloudflare stream
+After=network-online.target cloudflared-access-tcp.service
+Wants=network-online.target
+Requires=cloudflared-access-tcp.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/gost -L udp://0.0.0.0:{{ cloudflare_frontend_listen_port }}?keepAlive=true&ttl=180s&readBufferSize=65535 -F relay://{{ cloudflare_frontend_local_bind }}:{{ cloudflare_frontend_local_port }}
+Restart=always
+RestartSec=3s
+
+[Install]
+WantedBy=multi-user.target

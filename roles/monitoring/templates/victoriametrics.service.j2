@@ -1,7 +1,7 @@
 [Unit]
 Description=VictoriaMetrics single-node time series database
-After=network-online.target hans-tunnel.service node_exporter.service
-Wants=network-online.target hans-tunnel.service node_exporter.service
+After=network-online.target node_exporter.service
+Wants=network-online.target node_exporter.service
 
 [Service]
 Type=simple

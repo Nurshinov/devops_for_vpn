@@ -1,0 +1,32 @@
+---
+cloudflare_transport_mode: ""
+cloudflare_hostname: nurshinov-vpn.com
+
+cloudflared_version: 2026.8.3
+cloudflared_deb_url: >-
+  https://github.com/cloudflare/cloudflared/releases/download/
+  {{ cloudflared_version }}/cloudflared-linux-amd64.deb
+cloudflared_deb_checksum: sha256:660b348d473bba81997445b534e7eaefaf4c4e16331866922326c338a7013dd9
+
+gost_version: 3.2.6
+gost_archive_url: >-
+  https://github.com/go-gost/gost/releases/download/v{{ gost_version }}/
+  gost_{{ gost_version }}_linux_amd64.tar.gz
+gost_archive_checksum: sha256:b39037b0380ea001fb3c0c28441c2e10bfc694f90682739a65b53e55dce5238b
+
+cloudflare_backend_relay_bind: 127.0.0.1
+cloudflare_backend_relay_port: 12000
+cloudflare_backend_openvpn_bind: 127.0.0.1
+cloudflare_backend_openvpn_port: 11999
+cloudflare_backend_device: tun0
+cloudflare_backend_subnet: 10.0.0.0
+cloudflare_backend_mask: 255.255.255.0
+cloudflare_backend_network: 10.0.0.0/24
+cloudflare_backend_egress_iface: ""
+
+cloudflare_frontend_listen_port: 11999
+cloudflare_frontend_local_bind: 127.0.0.1
+cloudflare_frontend_local_port: 12001
+cloudflare_nginx_stream_dir: /etc/nginx/stream-conf.d
+
+cloudflare_legacy_hans_version: c79f12ffa2e1c344ce4b49a36c10cd980fd52b67

@@ -22,19 +22,11 @@ jobs:
           echo -e "${{secrets.SSH_KEY}}" > ~/.ssh/id_rsa
           echo "${{secrets.ANSIBLE_VAULT_PASSWORD }}" > ~/.vault_pass.txt
           chmod 600 ~/.ssh/id_rsa
-      - name: Deploy ICMP tunnel
-        env:
-          ANSIBLE_HOST_KEY_CHECKING: "False"
-        run: ansible-playbook install_icmp_tunnel.yml -i inventory
-      - name: Deploy OpenVPN
+      - name: Deploy Cloudflare OpenVPN transport
         env:
           ANSIBLE_HOST_KEY_CHECKING: "False"
           ANSIBLE_VAULT_PASSWORD_FILE: "~/.vault_pass.txt"
-        run: ansible-playbook install_openvpn.yml -i inventory
-      - name: Deploy Nginx proxy
-        env:
-          ANSIBLE_HOST_KEY_CHECKING: "False"
-        run: ansible-playbook install_nginx.yml -i inventory
+        run: ansible-playbook install_cloudflare_transport.yml -i inventory
       - name: Deploy monitoring
         env:
           ANSIBLE_HOST_KEY_CHECKING: "False"

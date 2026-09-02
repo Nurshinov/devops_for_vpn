@@ -1,0 +1,14 @@
+[Unit]
+Description=GOST relay from Cloudflare stream to Helsinki OpenVPN UDP
+After=network-online.target openvpn-server@server-cf.service
+Wants=network-online.target
+Requires=openvpn-server@server-cf.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/gost -L relay://{{ cloudflare_backend_relay_bind }}:{{ cloudflare_backend_relay_port }}/{{ cloudflare_backend_openvpn_bind }}:{{ cloudflare_backend_openvpn_port }}
+Restart=always
+RestartSec=3s
+
+[Install]
+WantedBy=multi-user.target

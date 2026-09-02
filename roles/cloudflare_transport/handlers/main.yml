@@ -1,0 +1,59 @@
+---
+- name: Restart Cloudflare tunnel
+  ansible.builtin.systemd:
+    name: cloudflared-tunnel.service
+    state: restarted
+    daemon_reload: true
+  listen: restart_cloudflare_tunnel
+  when: not ansible_check_mode
+
+- name: Restart Cloudflare access TCP
+  ansible.builtin.systemd:
+    name: cloudflared-access-tcp.service
+    state: restarted
+    daemon_reload: true
+  listen: restart_cloudflare_access_tcp
+  when: not ansible_check_mode
+
+- name: Restart Cloudflare OpenVPN backend
+  ansible.builtin.systemd:
+    name: openvpn-server@server-cf.service
+    state: restarted
+    daemon_reload: true
+  listen: restart_cloudflare_openvpn
+  when: not ansible_check_mode
+
+- name: Restart Cloudflare OpenVPN firewall
+  ansible.builtin.systemd:
+    name: openvpn-cf-iptables.service
+    state: restarted
+    daemon_reload: true
+  listen: restart_cloudflare_openvpn_firewall
+  when: not ansible_check_mode
+
+- name: Restart Helsinki GOST relay
+  ansible.builtin.systemd:
+    name: gost-cloudflare-backend.service
+    state: restarted
+    daemon_reload: true
+  listen: restart_gost_backend
+  when:
+    - not ansible_check_mode
+    - cloudflare_transport_mode == 'backend'
+
+- name: Restart Moscow GOST UDP frontend
+  ansible.builtin.systemd:
+    name: gost-cloudflare-frontend.service
+    state: restarted
+    daemon_reload: true
+  listen: restart_gost_frontend
+  when:
+    - not ansible_check_mode
+    - cloudflare_transport_mode == 'frontend'
+
+- name: Reload nginx for Cloudflare frontend
+  ansible.builtin.systemd:
+    name: nginx.service
+    state: reloaded
+  listen: reload_cloudflare_nginx
+  when: not ansible_check_mode

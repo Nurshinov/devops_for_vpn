@@ -1,7 +1,7 @@
 [Unit]
 Description=Prometheus Node Exporter
-After=network-online.target hans-tunnel.service
-Wants=network-online.target hans-tunnel.service
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
@@ -10,7 +10,7 @@ Group=node_exporter
 ExecStart=/usr/local/bin/node_exporter \
   --web.listen-address={{ node_exporter_listen_address }}:{{ node_exporter_port }} \
   --collector.systemd \
-  --collector.systemd.unit-include='^(hans-tunnel|openvpn-server@server|nginx|victoriametrics|grafana-server).service$'
+  --collector.systemd.unit-include='^(cloudflared-tunnel|openvpn-server@server-cf|openvpn-cf-iptables|nginx|victoriametrics|grafana-server).service$'
 Restart=always
 RestartSec=3s
 NoNewPrivileges=true
