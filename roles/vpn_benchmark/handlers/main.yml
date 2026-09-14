@@ -1,0 +1,8 @@
+---
+- name: Restart VPN benchmark server
+  ansible.builtin.systemd:
+    name: vpn-benchmark-iperf3.service
+    state: restarted
+    daemon_reload: true
+  listen: restart_vpn_benchmark
+  when: not ansible_check_mode

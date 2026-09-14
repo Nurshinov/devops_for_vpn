@@ -1,0 +1,7 @@
+---
+- name: Install the VPN benchmark endpoint in Helsinki
+  hosts: hetzner
+  become: true
+  serial: 1
+  roles:
+    - vpn_benchmark

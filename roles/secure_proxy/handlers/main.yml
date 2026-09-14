@@ -1,0 +1,22 @@
+---
+- name: Restart Helsinki proxy
+  ansible.builtin.systemd:
+    name: gost-helsinki-proxy.service
+    state: restarted
+    daemon_reload: true
+  listen: restart_helsinki_proxy
+  when:
+    - not ansible_check_mode
+    - secure_proxy_mode == 'backend'
+
+- name: Validate nginx proxy configuration
+  ansible.builtin.command: nginx -t
+  changed_when: false
+  listen: reload_secure_proxy_nginx
+
+- name: Reload nginx proxy configuration
+  ansible.builtin.systemd:
+    name: nginx.service
+    state: reloaded
+  listen: reload_secure_proxy_nginx
+  when: not ansible_check_mode

@@ -1,0 +1,30 @@
+---
+secure_proxy_mode: ""
+secure_proxy_domain: proxy.nurshinov-vpn.com
+secure_proxy_public_host: 188.120.226.48
+secure_proxy_public_host_is_ip: true
+secure_proxy_username: vpnproxy
+secure_proxy_password: ""
+
+secure_proxy_frontend_port: 8443
+secure_proxy_backend_host: 157.180.39.82
+secure_proxy_backend_bind: 127.0.0.1
+secure_proxy_backend_port: 18443
+secure_proxy_cloudflare_origin_port: 12000
+secure_proxy_vpn_relay_port: 12002
+secure_proxy_connect_timeout: 10s
+secure_proxy_timeout: 1h
+
+secure_proxy_gost_version: 3.2.6
+secure_proxy_gost_archive_url: >-
+  https://github.com/go-gost/gost/releases/download/v{{ secure_proxy_gost_version }}/
+  gost_{{ secure_proxy_gost_version }}_linux_amd64.tar.gz
+secure_proxy_gost_archive_checksum: sha256:b39037b0380ea001fb3c0c28441c2e10bfc694f90682739a65b53e55dce5238b
+
+secure_proxy_config_dir: /etc/gost-helsinki-proxy
+secure_proxy_nginx_main_config: /etc/nginx/nginx.conf
+secure_proxy_nginx_stream_dir: /etc/nginx/stream-conf.d
+secure_proxy_client_cert_path: "{{ playbook_dir }}/proxy-client/moscow-proxy.crt"
+secure_proxy_acme_webroot: /var/www/proxy-acme
+secure_proxy_acme_certificate_dir: "/etc/letsencrypt/live/{{ secure_proxy_domain }}"
+secure_proxy_backend_ca_path: /etc/nginx/proxy-backend.crt

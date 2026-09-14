@@ -1,0 +1,534 @@
+---
+- name: Validate secure proxy settings
+  ansible.builtin.assert:
+    that:
+      - secure_proxy_mode in ['backend', 'frontend']
+      - secure_proxy_frontend_port | int > 0
+      - secure_proxy_frontend_port | int < 65536
+      - secure_proxy_backend_port | int > 0
+      - secure_proxy_backend_port | int < 65536
+      - secure_proxy_mode != 'backend' or secure_proxy_public_host | length > 0
+      - secure_proxy_mode != 'backend' or secure_proxy_username is match('^[A-Za-z0-9_.-]+$')
+      - secure_proxy_mode != 'backend' or secure_proxy_password | length >= 20
+      - secure_proxy_mode != 'backend' or secure_proxy_password is match('^[A-Za-z0-9]+$')
+      - secure_proxy_mode != 'frontend' or secure_proxy_backend_host | length > 0
+      - secure_proxy_mode != 'frontend' or secure_proxy_domain | length > 0
+    fail_msg: Secure proxy mode, endpoints, and backend credentials must be valid
+  no_log: true
+
+- name: Gather service state for proxy migration
+  ansible.builtin.service_facts:
+
+- name: Configure the Helsinki proxy backend
+  when: secure_proxy_mode == 'backend'
+  block:
+    - name: Install backend runtime dependencies
+      ansible.builtin.apt:
+        name:
+          - ca-certificates
+          - openssl
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Check for the shared GOST binary
+      ansible.builtin.stat:
+        path: /usr/local/bin/gost
+      register: secure_proxy_gost_binary
+
+    - name: Install GOST when the VPN role has not installed it
+      when: not secure_proxy_gost_binary.stat.exists
+      block:
+        - name: Download the pinned GOST archive
+          ansible.builtin.get_url:
+            url: "{{ secure_proxy_gost_archive_url | replace(' ', '') }}"
+            dest: "/tmp/gost-{{ secure_proxy_gost_version }}-linux-amd64.tar.gz"
+            checksum: "{{ secure_proxy_gost_archive_checksum }}"
+            owner: root
+            group: root
+            mode: '0644'
+
+        - name: Ensure the GOST source directory exists
+          ansible.builtin.file:
+            path: "/usr/local/src/gost-{{ secure_proxy_gost_version }}"
+            state: directory
+            owner: root
+            group: root
+            mode: '0755'
+
+        - name: Extract the pinned GOST archive
+          ansible.builtin.unarchive:
+            src: "/tmp/gost-{{ secure_proxy_gost_version }}-linux-amd64.tar.gz"
+            dest: "/usr/local/src/gost-{{ secure_proxy_gost_version }}"
+            remote_src: true
+            creates: "/usr/local/src/gost-{{ secure_proxy_gost_version }}/gost"
+
+        - name: Install the GOST binary
+          ansible.builtin.copy:
+            src: "/usr/local/src/gost-{{ secure_proxy_gost_version }}/gost"
+            dest: /usr/local/bin/gost
+            remote_src: true
+            owner: root
+            group: root
+            mode: '0755'
+
+    - name: Create the unprivileged backend proxy account
+      ansible.builtin.user:
+        name: gost-proxy
+        system: true
+        shell: /usr/sbin/nologin
+        home: /nonexistent
+        create_home: false
+
+    - name: Create the backend proxy configuration directory
+      ansible.builtin.file:
+        path: "{{ secure_proxy_config_dir }}"
+        state: directory
+        owner: root
+        group: gost-proxy
+        mode: '0750'
+
+    - name: Install the proxy certificate request configuration
+      ansible.builtin.template:
+        src: openssl.cnf.j2
+        dest: "{{ secure_proxy_config_dir }}/openssl.cnf"
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Generate the internal proxy CA private key
+      ansible.builtin.command:
+        argv:
+          - openssl
+          - genpkey
+          - -algorithm
+          - RSA
+          - -pkeyopt
+          - rsa_keygen_bits:3072
+          - -out
+          - "{{ secure_proxy_config_dir }}/ca.key"
+        creates: "{{ secure_proxy_config_dir }}/ca.key"
+
+    - name: Protect the internal proxy CA private key
+      ansible.builtin.file:
+        path: "{{ secure_proxy_config_dir }}/ca.key"
+        owner: root
+        group: root
+        mode: '0600'
+
+    - name: Generate the internal proxy CA certificate
+      ansible.builtin.command:
+        argv:
+          - openssl
+          - req
+          - -x509
+          - -new
+          - -sha256
+          - -days
+          - '3650'
+          - -key
+          - "{{ secure_proxy_config_dir }}/ca.key"
+          - -out
+          - "{{ secure_proxy_config_dir }}/ca.crt"
+          - -subj
+          - /CN=Helsinki Proxy CA
+          - -addext
+          - basicConstraints=critical,CA:TRUE
+          - -addext
+          - keyUsage=critical,keyCertSign,cRLSign
+        creates: "{{ secure_proxy_config_dir }}/ca.crt"
+
+    - name: Generate the backend proxy TLS private key
+      ansible.builtin.command:
+        argv:
+          - openssl
+          - genpkey
+          - -algorithm
+          - RSA
+          - -pkeyopt
+          - rsa_keygen_bits:3072
+          - -out
+          - "{{ secure_proxy_config_dir }}/proxy.key"
+        creates: "{{ secure_proxy_config_dir }}/proxy.key"
+      notify: restart_helsinki_proxy
+
+    - name: Protect the backend proxy TLS private key
+      ansible.builtin.file:
+        path: "{{ secure_proxy_config_dir }}/proxy.key"
+        owner: root
+        group: gost-proxy
+        mode: '0640'
+
+    - name: Inspect the backend proxy certificate issuer
+      ansible.builtin.command:
+        argv:
+          - openssl
+          - x509
+          - -in
+          - "{{ secure_proxy_config_dir }}/proxy.crt"
+          - -noout
+          - -issuer
+      register: secure_proxy_certificate_issuer
+      changed_when: false
+      failed_when: false
+
+    - name: Generate the backend proxy certificate request
+      ansible.builtin.command:
+        argv:
+          - openssl
+          - req
+          - -new
+          - -sha256
+          - -key
+          - "{{ secure_proxy_config_dir }}/proxy.key"
+          - -out
+          - "{{ secure_proxy_config_dir }}/proxy.csr"
+          - -config
+          - "{{ secure_proxy_config_dir }}/openssl.cnf"
+      when: "'Helsinki Proxy CA' not in secure_proxy_certificate_issuer.stdout"
+
+    - name: Sign the backend proxy certificate with the internal CA
+      ansible.builtin.command:
+        argv:
+          - openssl
+          - x509
+          - -req
+          - -in
+          - "{{ secure_proxy_config_dir }}/proxy.csr"
+          - -CA
+          - "{{ secure_proxy_config_dir }}/ca.crt"
+          - -CAkey
+          - "{{ secure_proxy_config_dir }}/ca.key"
+          - -CAcreateserial
+          - -out
+          - "{{ secure_proxy_config_dir }}/proxy.crt"
+          - -days
+          - '825'
+          - -sha256
+          - -extfile
+          - "{{ secure_proxy_config_dir }}/openssl.cnf"
+          - -extensions
+          - extensions
+      when: "'Helsinki Proxy CA' not in secure_proxy_certificate_issuer.stdout"
+      notify: restart_helsinki_proxy
+
+    - name: Allow the proxy account to read the TLS certificate
+      ansible.builtin.file:
+        path: "{{ secure_proxy_config_dir }}/proxy.crt"
+        owner: root
+        group: gost-proxy
+        mode: '0644'
+
+    - name: Install the authenticated backend proxy configuration
+      ansible.builtin.template:
+        src: gost.yml.j2
+        dest: "{{ secure_proxy_config_dir }}/gost.yml"
+        owner: root
+        group: gost-proxy
+        mode: '0640'
+      no_log: true
+      notify: restart_helsinki_proxy
+
+    - name: Install the Helsinki proxy service
+      ansible.builtin.template:
+        src: gost-helsinki-proxy.service.j2
+        dest: /etc/systemd/system/gost-helsinki-proxy.service
+        owner: root
+        group: root
+        mode: '0644'
+      notify: restart_helsinki_proxy
+
+    - name: Stop the obsolete direct-backend firewall service
+      ansible.builtin.systemd:
+        name: gost-helsinki-proxy-iptables.service
+        state: stopped
+        enabled: false
+      when: "'gost-helsinki-proxy-iptables.service' in ansible_facts.services"
+
+    - name: Remove the obsolete direct-backend firewall service
+      ansible.builtin.file:
+        path: /etc/systemd/system/gost-helsinki-proxy-iptables.service
+        state: absent
+
+    - name: Install nginx with stream support on Helsinki
+      ansible.builtin.apt:
+        name:
+          - nginx
+          - libnginx-mod-stream
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Create the Helsinki nginx stream configuration directory
+      ansible.builtin.file:
+        path: "{{ secure_proxy_nginx_stream_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Install the Cloudflare stream multiplexer
+      ansible.builtin.template:
+        src: nginx-cloudflare-multiplexer.conf.j2
+        dest: "{{ secure_proxy_nginx_stream_dir }}/cloudflare-multiplexer.conf"
+        owner: root
+        group: root
+        mode: '0644'
+      notify: reload_secure_proxy_nginx
+
+    - name: Read the Helsinki nginx main configuration
+      ansible.builtin.slurp:
+        src: "{{ secure_proxy_nginx_main_config }}"
+      register: secure_proxy_backend_nginx_main_contents
+
+    - name: Include proxy configurations in the Helsinki stream context
+      ansible.builtin.lineinfile:
+        path: "{{ secure_proxy_nginx_main_config }}"
+        regexp: '^[ \t]*include[ \t]+{{ secure_proxy_nginx_stream_dir | regex_escape }}/\*\.conf;'
+        insertafter: '^[ \t]*stream[ \t]*\{'
+        line: "  include {{ secure_proxy_nginx_stream_dir }}/*.conf;"
+      when: >-
+        (secure_proxy_backend_nginx_main_contents.content | b64decode |
+        regex_search('(?m)^stream\s*\{')) is not none
+      notify: reload_secure_proxy_nginx
+
+    - name: Create a Helsinki stream context when nginx does not have one
+      ansible.builtin.blockinfile:
+        path: "{{ secure_proxy_nginx_main_config }}"
+        marker: '# {mark} ANSIBLE MANAGED STREAM PROXIES'
+        insertafter: EOF
+        block: |
+          stream {
+            include {{ secure_proxy_nginx_stream_dir }}/*.conf;
+          }
+      when: >-
+        (secure_proxy_backend_nginx_main_contents.content | b64decode |
+        regex_search('(?m)^stream\s*\{')) is none
+      notify: reload_secure_proxy_nginx
+
+    - name: Validate the Helsinki nginx configuration
+      ansible.builtin.command: nginx -t
+      changed_when: false
+
+    - name: Apply backend changes before startup
+      ansible.builtin.meta: flush_handlers
+
+    - name: Start the Helsinki proxy services
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        state: started
+        enabled: true
+        daemon_reload: true
+      loop:
+        - gost-helsinki-proxy.service
+        - nginx.service
+
+    - name: Create the local proxy client directory
+      ansible.builtin.file:
+        path: "{{ secure_proxy_client_cert_path | dirname }}"
+        state: directory
+        mode: '0700'
+      delegate_to: localhost
+      become: false
+
+    - name: Fetch the backend certificate for proxy clients
+      ansible.builtin.fetch:
+        src: "{{ secure_proxy_config_dir }}/ca.crt"
+        dest: "{{ secure_proxy_client_cert_path }}"
+        flat: true
+
+    - name: Verify that the Helsinki proxy port is listening
+      ansible.builtin.wait_for:
+        host: 127.0.0.1
+        port: "{{ secure_proxy_backend_port }}"
+        timeout: 10
+      check_mode: false
+
+- name: Configure the Moscow nginx frontend
+  when: secure_proxy_mode == 'frontend'
+  block:
+    - name: Stop the incorrectly placed Moscow proxy
+      ansible.builtin.systemd:
+        name: gost-moscow-proxy.service
+        state: stopped
+        enabled: false
+      when: "'gost-moscow-proxy.service' in ansible_facts.services"
+
+    - name: Remove the incorrectly placed Moscow proxy files
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/systemd/system/gost-moscow-proxy.service
+        - /etc/gost-moscow-proxy
+
+    - name: Remove the obsolete Moscow proxy account
+      ansible.builtin.user:
+        name: gost-proxy
+        state: absent
+        remove: false
+
+    - name: Install nginx with stream support
+      ansible.builtin.apt:
+        name:
+          - certbot
+          - nginx
+          - libnginx-mod-stream
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Resolve the public proxy domain
+      ansible.builtin.command: "getent ahostsv4 {{ secure_proxy_domain }}"
+      register: secure_proxy_domain_dns
+      changed_when: false
+      check_mode: false
+
+    - name: Validate that the proxy domain points to Moscow
+      ansible.builtin.assert:
+        that:
+          - (ansible_host | default(inventory_hostname)) in secure_proxy_domain_dns.stdout
+        fail_msg: >-
+          {{ secure_proxy_domain }} must resolve directly to
+          {{ ansible_host | default(inventory_hostname) }} before ACME issuance
+
+    - name: Create the proxy ACME webroot
+      ansible.builtin.file:
+        path: "{{ secure_proxy_acme_webroot }}/.well-known/acme-challenge"
+        state: directory
+        owner: www-data
+        group: www-data
+        mode: '0755'
+
+    - name: Install the proxy ACME HTTP virtual host
+      ansible.builtin.template:
+        src: nginx-acme.conf.j2
+        dest: /etc/nginx/conf.d/proxy-acme.conf
+        owner: root
+        group: root
+        mode: '0644'
+      notify: reload_secure_proxy_nginx
+
+    - name: Start nginx for the ACME challenge
+      ansible.builtin.systemd:
+        name: nginx.service
+        state: started
+        enabled: true
+
+    - name: Apply the ACME HTTP configuration
+      ansible.builtin.meta: flush_handlers
+
+    - name: Check for an existing public proxy certificate
+      ansible.builtin.stat:
+        path: "{{ secure_proxy_acme_certificate_dir }}/fullchain.pem"
+      register: secure_proxy_acme_certificate
+
+    - name: Issue the public proxy certificate
+      ansible.builtin.command:
+        argv:
+          - certbot
+          - certonly
+          - --webroot
+          - --webroot-path
+          - "{{ secure_proxy_acme_webroot }}"
+          - --domain
+          - "{{ secure_proxy_domain }}"
+          - --non-interactive
+          - --agree-tos
+          - --register-unsafely-without-email
+      when: not secure_proxy_acme_certificate.stat.exists
+      notify: reload_secure_proxy_nginx
+
+    - name: Install the certificate renewal nginx hook
+      ansible.builtin.copy:
+        dest: /etc/letsencrypt/renewal-hooks/deploy/reload-nginx
+        content: |
+          #!/bin/sh
+          set -eu
+          /usr/sbin/nginx -t
+          /bin/systemctl reload nginx.service
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Enable automatic certificate renewal
+      ansible.builtin.systemd:
+        name: certbot.timer
+        state: started
+        enabled: true
+
+    - name: Install the pinned Helsinki backend certificate on Moscow
+      ansible.builtin.copy:
+        src: "{{ secure_proxy_client_cert_path }}"
+        dest: "{{ secure_proxy_backend_ca_path }}"
+        owner: root
+        group: root
+        mode: '0644'
+      notify: reload_secure_proxy_nginx
+
+    - name: Create the nginx stream configuration directory
+      ansible.builtin.file:
+        path: "{{ secure_proxy_nginx_stream_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Install the Moscow TCP passthrough configuration
+      ansible.builtin.template:
+        src: nginx-stream.conf.j2
+        dest: "{{ secure_proxy_nginx_stream_dir }}/helsinki-proxy.conf"
+        owner: root
+        group: root
+        mode: '0644'
+      notify: reload_secure_proxy_nginx
+
+    - name: Read the nginx main configuration
+      ansible.builtin.slurp:
+        src: "{{ secure_proxy_nginx_main_config }}"
+      register: secure_proxy_nginx_main_contents
+
+    - name: Include proxy configurations in the existing stream context
+      ansible.builtin.lineinfile:
+        path: "{{ secure_proxy_nginx_main_config }}"
+        regexp: '^[ \t]*include[ \t]+{{ secure_proxy_nginx_stream_dir | regex_escape }}/\*\.conf;'
+        insertafter: '^[ \t]*stream[ \t]*\{'
+        line: "  include {{ secure_proxy_nginx_stream_dir }}/*.conf;"
+      when: >-
+        (secure_proxy_nginx_main_contents.content | b64decode |
+        regex_search('(?m)^stream\s*\{')) is not none
+      notify: reload_secure_proxy_nginx
+
+    - name: Create a stream context when nginx does not have one
+      ansible.builtin.blockinfile:
+        path: "{{ secure_proxy_nginx_main_config }}"
+        marker: '# {mark} ANSIBLE MANAGED STREAM PROXIES'
+        insertafter: EOF
+        block: |
+          stream {
+            include {{ secure_proxy_nginx_stream_dir }}/*.conf;
+          }
+      when: >-
+        (secure_proxy_nginx_main_contents.content | b64decode |
+        regex_search('(?m)^stream\s*\{')) is none
+      notify: reload_secure_proxy_nginx
+
+    - name: Validate the Moscow nginx configuration
+      ansible.builtin.command: nginx -t
+      changed_when: false
+
+    - name: Enable and start nginx
+      ansible.builtin.systemd:
+        name: nginx.service
+        state: started
+        enabled: true
+
+    - name: Apply Moscow nginx changes
+      ansible.builtin.meta: flush_handlers
+
+    - name: Verify that the Moscow proxy frontend is listening
+      ansible.builtin.wait_for:
+        host: 127.0.0.1
+        port: "{{ secure_proxy_frontend_port }}"
+        timeout: 10
+      check_mode: false

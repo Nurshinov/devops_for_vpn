@@ -1,0 +1,21 @@
+[req]
+prompt = no
+distinguished_name = subject
+req_extensions = extensions
+
+[subject]
+CN = {{ secure_proxy_public_host }}
+O = Personal Helsinki Proxy
+
+[extensions]
+basicConstraints = critical,CA:FALSE
+keyUsage = critical,digitalSignature,keyEncipherment
+extendedKeyUsage = serverAuth
+subjectAltName = @alt_names
+
+[alt_names]
+{% if secure_proxy_public_host_is_ip | bool %}
+IP.1 = {{ secure_proxy_public_host }}
+{% else %}
+DNS.1 = {{ secure_proxy_public_host }}
+{% endif %}

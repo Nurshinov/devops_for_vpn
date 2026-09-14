@@ -1,0 +1,30 @@
+---
+- name: Install the HTTPS proxy backend with Helsinki egress
+  hosts: hetzner
+  become: true
+  serial: 1
+  vars_files:
+    - vars/cloudflare_vault.yml
+  vars:
+    cloudflare_transport_mode: backend
+    cloudflare_backend_relay_port: 12002
+    secure_proxy_mode: backend
+    secure_proxy_public_host: "{{ hostvars[groups['firstvds'][0]].ansible_host }}"
+    secure_proxy_allowed_source: "{{ hostvars[groups['firstvds'][0]].ansible_host }}"
+    secure_proxy_password: >-
+      {{ lookup('ansible.builtin.password', playbook_dir + '/.proxy-password',
+                length=32, chars=['ascii_letters', 'digits']) }}
+  roles:
+    - cloudflare_transport
+    - secure_proxy
+
+- name: Install the Moscow nginx frontend for the Helsinki proxy
+  hosts: firstvds
+  become: true
+  serial: 1
+  vars:
+    secure_proxy_mode: frontend
+    secure_proxy_backend_host: 127.0.0.1
+    secure_proxy_backend_port: 12001
+  roles:
+    - secure_proxy

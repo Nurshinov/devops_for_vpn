@@ -15,7 +15,7 @@ gost_archive_url: >-
 gost_archive_checksum: sha256:b39037b0380ea001fb3c0c28441c2e10bfc694f90682739a65b53e55dce5238b
 
 cloudflare_backend_relay_bind: 127.0.0.1
-cloudflare_backend_relay_port: 12000
+cloudflare_backend_relay_port: 12002
 cloudflare_backend_openvpn_bind: 127.0.0.1
 cloudflare_backend_openvpn_port: 11999
 cloudflare_backend_device: tun0

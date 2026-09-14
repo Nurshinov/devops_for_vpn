@@ -31,3 +31,7 @@ jobs:
         env:
           ANSIBLE_HOST_KEY_CHECKING: "False"
         run: ansible-playbook install_monitoring.yml -i inventory
+      - name: Deploy VPN benchmark endpoint
+        env:
+          ANSIBLE_HOST_KEY_CHECKING: "False"
+        run: ansible-playbook install_benchmark.yml -i inventory

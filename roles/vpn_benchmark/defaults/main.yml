@@ -1,0 +1,4 @@
+---
+vpn_benchmark_bind_address: 10.0.0.1
+vpn_benchmark_port: 5201
+vpn_benchmark_openvpn_service: openvpn-server@server-cf.service

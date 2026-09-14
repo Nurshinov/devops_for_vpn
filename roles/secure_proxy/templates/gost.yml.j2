@@ -1,0 +1,37 @@
+services:
+  - name: helsinki-https-proxy
+    addr: "{{ secure_proxy_backend_bind }}:{{ secure_proxy_backend_port }}"
+    bypass: private-networks
+    handler:
+      type: http
+      auth:
+        username: {{ secure_proxy_username | to_json }}
+        password: {{ secure_proxy_password | to_json }}
+      metadata:
+        readTimeout: 30s
+        idleTimeout: 10m
+    listener:
+      type: tls
+      tls:
+        certFile: "{{ secure_proxy_config_dir }}/proxy.crt"
+        keyFile: "{{ secure_proxy_config_dir }}/proxy.key"
+        options:
+          minVersion: VersionTLS12
+          maxVersion: VersionTLS13
+
+bypasses:
+  - name: private-networks
+    matchers:
+      - 0.0.0.0/8
+      - 10.0.0.0/8
+      - 100.64.0.0/10
+      - 127.0.0.0/8
+      - 169.254.0.0/16
+      - 172.16.0.0/12
+      - 192.168.0.0/16
+      - 224.0.0.0/4
+      - ::1
+      - fc00::/7
+      - fe80::/10
+      - localhost
+      - '*.localhost'

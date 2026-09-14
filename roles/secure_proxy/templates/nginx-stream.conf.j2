@@ -1,0 +1,29 @@
+log_format helsinki_proxy '$time_iso8601 $remote_addr '
+                          '$protocol $status $bytes_sent $bytes_received '
+                          '$session_time $upstream_addr '
+                          '"$upstream_bytes_sent" "$upstream_bytes_received" '
+                          '"$upstream_connect_time"';
+
+upstream helsinki_proxy_backend {
+  server {{ secure_proxy_backend_host }}:{{ secure_proxy_backend_port }};
+}
+
+server {
+  listen {{ secure_proxy_frontend_port }} ssl;
+  ssl_certificate {{ secure_proxy_acme_certificate_dir }}/fullchain.pem;
+  ssl_certificate_key {{ secure_proxy_acme_certificate_dir }}/privkey.pem;
+  ssl_protocols TLSv1.2 TLSv1.3;
+  ssl_session_cache shared:proxy_tls:10m;
+
+  proxy_connect_timeout {{ secure_proxy_connect_timeout }};
+  proxy_timeout {{ secure_proxy_timeout }};
+  proxy_ssl on;
+  proxy_ssl_verify on;
+  proxy_ssl_verify_depth 1;
+  proxy_ssl_trusted_certificate {{ secure_proxy_backend_ca_path }};
+  proxy_ssl_server_name on;
+  proxy_ssl_name {{ secure_proxy_public_host }};
+  proxy_pass helsinki_proxy_backend;
+
+  access_log /var/log/nginx/helsinki-proxy-access.log helsinki_proxy;
+}
